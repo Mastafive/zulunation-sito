@@ -1,0 +1,75 @@
+name: Importa dal blog e pubblica
+
+on:
+  schedule:
+    - cron: "17 */3 * * *"   # ogni 3 ore
+  workflow_dispatch:
+    inputs:
+      full:
+        description: "Rileggi tutti gli articoli (anche quelli già importati)"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: sync-deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Importa articoli, pagine e immagini da Blogger
+        run: python scripts/sync.py ${{ inputs.full && '--full' || '' }}
+
+      - name: Salva i contenuti importati nel repository
+        run: |
+          git config user.name "zulunation-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add content assets
+          if git diff --cached --quiet; then
+            echo "Nessun contenuto nuovo"
+          else
+            git commit -m "Import automatico dal blog $(date -u +'%Y-%m-%d %H:%M')"
+            git pull --rebase origin main
+            git push
+          fi
+
+      - id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Genera il sito
+        env:
+          BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          SITE_URL: ${{ steps.pages.outputs.base_url }}
+        run: python scripts/build.py
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

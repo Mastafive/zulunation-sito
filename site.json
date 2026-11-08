@@ -1,0 +1,37 @@
+{
+  "title": "Zulu Nation Italia",
+  "short_title": "ZULU NATION",
+  "tagline": "Chapter ufficiale Universal Zulu Nation Italia",
+  "description": "Peace, Unity, Love & Having Fun. Il sito ufficiale della Universal Zulu Nation Italia: eventi, knowledge, storia e cultura Hip Hop.",
+  "source_blog": "https://zulunationitalia.blogspot.com",
+  "site_url": "https://www.zulunation.it",
+  "custom_domain": "",
+  "lang": "it",
+  "posts_per_page": 24,
+  "image_max_width": 1600,
+  "image_quality": 80,
+  "nav": [
+    {"title": "News", "label": "news"},
+    {"title": "Eventi", "label": "Eventi"},
+    {"title": "Knowledge", "label": "knowledge"},
+    {"title": "Musica", "label": "Musica"},
+    {"title": "Hip Hop History", "label": "Hip Hop History"},
+    {"title": "Breaking", "label": "B.Boying/B.Girling"},
+    {"title": "Writing", "label": "Writing"},
+    {"title": "Libri", "label": "libri"},
+    {"title": "Chi siamo", "page": "/p/ozm-dal-2007-oggi.html"},
+    {"title": "Contatti", "page": "/p/contatti.html"}
+  ],
+  "trending_label": "knowledge",
+  "dark_section_label": "Eventi",
+  "home_sections": ["Hip Hop History", "Musica", "B.Boying/B.Girling", "Writing", "Hip Hop Italy", "libri"],
+  "cta": {
+    "title": "Diventa membro della Zulu Nation",
+    "text": "Peace, Unity, Love & Having Fun. Scopri come entrare a far parte del chapter italiano.",
+    "button": "Scopri come",
+    "url": "/p/diventare-membro.html"
+  },
+  "social": {
+    "instagram": "https://www.instagram.com/zulu_nation_italia_official/"
+  }
+}
