@@ -23,6 +23,7 @@ import os
 import re
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -52,17 +53,40 @@ def log(*a):
     print(*a, flush=True)
 
 
-def fetch(url, binary=False, tries=3):
+_page_lock = threading.Lock()
+_last_page = [0.0]
+PAGE_DELAY = float(os.environ.get("SYNC_PAGE_DELAY", "1.5"))
+
+
+def fetch(url, binary=False, tries=5, polite=False):
+    """Scarica un URL. polite=True distanzia le richieste al blog per evitare l'errore 429."""
     last = None
     for i in range(tries):
+        if polite:
+            with _page_lock:
+                wait = PAGE_DELAY - (time.time() - _last_page[0])
+                if wait > 0:
+                    time.sleep(wait)
+                _last_page[0] = time.time()
         try:
             req = urllib.request.Request(url, headers={"User-Agent": UA})
             with urllib.request.urlopen(req, timeout=40) as r:
                 data = r.read()
                 return data if binary else data.decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            last = e
+            if e.code == 404:
+                break
+            if e.code == 429:
+                ra = e.headers.get("Retry-After")
+                pause = int(ra) if ra and ra.isdigit() else 30 * (i + 1)
+                log(f"   … Blogger chiede di rallentare, attendo {pause}s")
+                time.sleep(min(pause, 180))
+                continue
+            time.sleep(2 * (i + 1))
         except Exception as e:  # noqa
             last = e
-            time.sleep(1.5 * (i + 1))
+            time.sleep(2 * (i + 1))
     raise last
 
 
@@ -72,7 +96,7 @@ def feed_entries(kind="posts"):
     """Tutti gli entry del feed, deduplicati per id."""
     seen = {}
     if kind == "pages":
-        data = json.loads(fetch(f"{BLOG}/feeds/pages/default?alt=json&max-results=500"))
+        data = json.loads(fetch(f"{BLOG}/feeds/pages/default?alt=json&max-results=500", polite=True))
         for e in data["feed"].get("entry", []):
             seen[e["id"]["$t"]] = e
         return list(seen.values())
@@ -81,7 +105,7 @@ def feed_entries(kind="posts"):
         url = f"{BLOG}/feeds/posts/summary?alt=json&max-results=150&orderby=published"
         if cursor:
             url += "&published-max=" + urllib.parse.quote(cursor)
-        data = json.loads(fetch(url))
+        data = json.loads(fetch(url, polite=True))
         entries = data["feed"].get("entry", [])
         added = 0
         for e in entries:
@@ -338,16 +362,20 @@ def process(entry, kind, images, existing, full):
     key = re.sub(r"[^a-z0-9]+", "-", path.lower()).strip("-").replace("-html", "")
     target = (POSTS_DIR if kind == "post" else PAGES_DIR) / f"{key}.json"
     old = existing.get(target.name)
-    if old and old.get("updated") == updated and not full:
+    if old and old.get("updated") == updated and not old.get("partial") and not full:
         return target.name
     log(f" > {kind}: {entry['title']['$t'][:80]}")
+    partial = False
     try:
-        raw = extract_body(fetch(link))
+        raw = extract_body(fetch(link, polite=True))
+        if not raw.strip():
+            raise ValueError("corpo articolo vuoto")
     except Exception as e:
         log("   ! pagina non leggibile:", link, e)
-        if old:
+        if old and not old.get("partial"):
             return target.name
         raw = (entry.get("content") or entry.get("summary") or {}).get("$t", "")
+        partial = True
     html, first_img = clean_html(raw, images)
     cover = None
     thumb = (entry.get("media$thumbnail") or {}).get("url")
@@ -370,6 +398,8 @@ def process(entry, kind, images, existing, full):
         "source_url": link,
         "html": html,
     }
+    if partial:
+        data["partial"] = True  # verrà riletto al prossimo giro
     target.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
     return target.name
 
