@@ -36,6 +36,8 @@ jobs:
       - run: pip install -r requirements.txt
 
       - name: Importa articoli, pagine e immagini da Blogger
+        env:
+          SYNC_MAX_MINUTES: "50"
         run: python scripts/sync.py ${{ inputs.full && '--full' || '' }}
 
       - name: Salva i contenuti importati nel repository

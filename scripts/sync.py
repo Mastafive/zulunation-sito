@@ -14,6 +14,8 @@ Importa articoli, pagine e immagini dal blog Blogger originale.
 Uso: python scripts/sync.py [--full] [--limit N]
 """
 import argparse
+import threading
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import io
 import json
@@ -118,10 +120,19 @@ class ImageStore:
     def __init__(self):
         self.map = json.loads(MANIFEST.read_text()) if MANIFEST.exists() else {}
         self.changed = False
+        self.lock = threading.Lock()
+
+    def prefetch(self, urls):
+        urls = [u for u in dict.fromkeys(urls) if u and IMG_HOST_RE.search(u)]
+        if urls:
+            with ThreadPoolExecutor(max_workers=8) as ex:
+                list(ex.map(self.get, urls))
 
     def save(self):
         if self.changed:
-            MANIFEST.write_text(json.dumps(self.map, indent=1, sort_keys=True), encoding="utf-8")
+            with self.lock:
+                snapshot = dict(self.map)
+            MANIFEST.write_text(json.dumps(snapshot, indent=1, sort_keys=True), encoding="utf-8")
 
     def get(self, url):
         """Ritorna il percorso locale (/assets/img/...) o None se non scaricabile."""
@@ -229,6 +240,12 @@ def clean_html(html, images):
         t.unwrap()
 
     first_img = None
+    urls = []
+    for img in soup.find_all("img"):
+        urls.append(img.get("src") or img.get("data-src") or "")
+        if img.parent and img.parent.name == "a":
+            urls.append(img.parent.get("href", ""))
+    images.prefetch(urls)
     for img in soup.find_all("img"):
         src = img.get("src") or img.get("data-src") or ""
         if IMG_HOST_RE.search(src):
@@ -357,10 +374,15 @@ def process(entry, kind, images, existing, full):
     return target.name
 
 
+START = time.time()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--full", action="store_true", help="rilegge tutti gli articoli")
     ap.add_argument("--limit", type=int, default=0, help="solo i primi N articoli (test)")
+    ap.add_argument("--max-minutes", type=float, default=float(os.environ.get("SYNC_MAX_MINUTES", 0) or 0),
+                    help="si ferma dopo N minuti salvando il lavoro fatto (0 = nessun limite)")
     args = ap.parse_args()
 
     POSTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -379,13 +401,18 @@ def main():
             entries = entries[: args.limit]
         log(f"{feed_kind}: {len(entries)} sul blog, {len(existing)} già importati")
         keep = set()
+        stopped = False
         for i, e in enumerate(entries):
+            if args.max_minutes and time.time() - START > args.max_minutes * 60:
+                log(f"Tempo massimo raggiunto: continuo al prossimo giro ({i}/{len(entries)}).")
+                stopped = True
+                break
             name = process(e, kind, images, existing, args.full)
             if name:
                 keep.add(name)
             if i % 20 == 0:
                 images.save()
-        if not args.limit:
+        if not args.limit and not stopped:
             for name in set(existing) - keep:
                 log(" - rimosso (non più sul blog):", name)
                 (d / name).unlink()
