@@ -80,6 +80,12 @@ def load(kind):
 
 
 POSTS = sorted(load("posts"), key=lambda p: p["published"], reverse=True)
+YT_RE = re.compile(r"youtube(?:-nocookie)?\.com/embed/([A-Za-z0-9_-]{6,})")
+for _p in POSTS:
+    if not _p.get("cover"):
+        m = YT_RE.search(_p.get("html", ""))
+        if m:
+            _p["cover"] = f"https://i.ytimg.com/vi/{m.group(1)}/hqdefault.jpg"
 PAGES = load("pages")
 LABELS = defaultdict(list)
 for p in POSTS:
@@ -201,7 +207,7 @@ def nav_html(active=None):
 def layout(title, body, *, desc=None, active=None, canonical="/", og_image=None, og_type="website", extra_head=""):
     full_title = f"{title} | {CFG['title']}" if title != CFG["title"] else f"{CFG['title']} — {CFG['tagline']}"
     desc = desc or CFG["description"]
-    og = f'<meta property="og:image" content="{E(SITE_URL + og_image)}">' if og_image else ""
+    og = f'<meta property="og:image" content="{E(og_image if og_image.startswith("http") else ORIGIN + U(og_image))}">' if og_image else ""
     year = datetime.now().year
     pages_links = "".join(f'<li><a href="{U(p["path"])}">{E(p["title"])}</a></li>' for p in sorted(PAGES, key=lambda x: x["title"]))
     top_labels = sorted(LABELS.items(), key=lambda kv: -len(kv[1]))[:12]
@@ -368,7 +374,7 @@ def build_post(p, idx):
         "datePublished": p["published"], "dateModified": p["updated"],
         "author": {"@type": "Person", "name": p.get("author") or CFG["title"]},
         "publisher": {"@type": "Organization", "name": CFG["title"]},
-        "image": (SITE_URL + p["cover"]) if p.get("cover") else None,
+        "image": (p["cover"] if p["cover"].startswith("http") else ORIGIN + U(p["cover"])) if p.get("cover") else None,
         "mainEntityOfPage": SITE_URL + p["path"],
     }, ensure_ascii=False)
     body = f'''<article class="post">
