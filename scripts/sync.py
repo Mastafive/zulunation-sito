@@ -53,6 +53,7 @@ def log(*a):
     print(*a, flush=True)
 
 
+HTML_BLOCKED = [0]
 _page_lock = threading.Lock()
 _last_page = [0.0]
 PAGE_DELAY = float(os.environ.get("SYNC_PAGE_DELAY", "1.5"))
@@ -79,7 +80,7 @@ def fetch(url, binary=False, tries=5, polite=False):
                 break
             if e.code == 429:
                 ra = e.headers.get("Retry-After")
-                pause = int(ra) if ra and ra.isdigit() else 30 * (i + 1)
+                pause = int(ra) if ra and ra.isdigit() else 20 * (i + 1)
                 log(f"   … Blogger chiede di rallentare, attendo {pause}s")
                 time.sleep(min(pause, 180))
                 continue
@@ -102,7 +103,7 @@ def feed_entries(kind="posts"):
         return list(seen.values())
     cursor = None
     for _ in range(100):
-        url = f"{BLOG}/feeds/posts/summary?alt=json&max-results=150&orderby=published"
+        url = f"{BLOG}/feeds/posts/default?alt=json&max-results=150&orderby=published"
         if cursor:
             url += "&published-max=" + urllib.parse.quote(cursor)
         data = json.loads(fetch(url, polite=True))
@@ -366,16 +367,31 @@ def process(entry, kind, images, existing, full):
         return target.name
     log(f" > {kind}: {entry['title']['$t'][:80]}")
     partial = False
-    try:
-        raw = extract_body(fetch(link, polite=True))
-        if not raw.strip():
-            raise ValueError("corpo articolo vuoto")
-    except Exception as e:
-        log("   ! pagina non leggibile:", link, e)
+    feed_html = (entry.get("content") or {}).get("$t")
+    if feed_html:
+        # feed "completo": il testo intero arriva già dal feed, nessuna pagina da scaricare
+        raw = feed_html
+    elif HTML_BLOCKED[0] >= 2:
         if old and not old.get("partial"):
             return target.name
-        raw = (entry.get("content") or entry.get("summary") or {}).get("$t", "")
+        raw = (entry.get("summary") or {}).get("$t", "")
         partial = True
+    else:
+        try:
+            raw = extract_body(fetch(link, polite=True, tries=2))
+            if not raw.strip():
+                raise ValueError("corpo articolo vuoto")
+            HTML_BLOCKED[0] = 0
+        except Exception as e:
+            log("   ! pagina non leggibile:", link, e)
+            if getattr(e, "code", None) == 429:
+                HTML_BLOCKED[0] += 1
+                if HTML_BLOCKED[0] >= 2:
+                    log("   Blogger blocca le pagine: per questo giro tengo i riassunti e riprovo al prossimo.")
+            if old and not old.get("partial"):
+                return target.name
+            raw = (entry.get("summary") or {}).get("$t", "")
+            partial = True
     html, first_img = clean_html(raw, images)
     cover = None
     thumb = (entry.get("media$thumbnail") or {}).get("url")
